@@ -127,8 +127,8 @@ df = st.session_state.transazioni
 df_previste = st.session_state.somme_previste
 df_attivita = st.session_state.attivita_ore
 
-totale_spese_reali = df[df["Tipo"] == "Spesa"]["Importo"].sum() if not df.empty else 0.0
-totale_previste_attivo = df_previste[df_previste["Stato"] == "Attiva"]["Importo Previsto"].sum() if not df_previste.empty else 0.0
+totale_spese_reali = pd.to_numeric(df[df["Tipo"] == "Spesa"]["Importo"], errors="coerce").fillna(0.0).sum() if not df.empty else 0.0
+totale_previste_attivo = pd.to_numeric(df_previste[df_previste["Stato"] == "Attiva"]["Importo Previsto"], errors="coerce").fillna(0.0).sum() if not df_previste.empty else 0.0
 
 col1, col2, col3 = st.columns(3)
 col1.metric("Spese Reali Totali", f"{totale_spese_reali:.2f} €")
@@ -139,26 +139,28 @@ saldi = {io: 0.0, socio: 0.0}
 
 if not df.empty:
     for _, row in df.iterrows():
-        imp = float(row["Importo"])
-        paga = row["Pagato Da"]
-        if row["Tipo"] == "Spesa":
+        imp = float(pd.to_numeric(row.get("Importo", 0.0), errors="coerce") or 0.0)
+        paga = row.get("Pagato Da", "")
+        if row.get("Tipo") == "Spesa":
             if paga in saldi:
                 saldi[paga] += imp
-            partecipanti = row["Coinvolti"].split(", ") if isinstance(row["Coinvolti"], str) else row["Coinvolti"]
+            coinvolti_val = row.get("Coinvolti", "")
+            partecipanti = coinvolti_val.split(", ") if isinstance(coinvolti_val, str) and coinvolti_val else (coinvolti_val if isinstance(coinvolti_val, list) else soci)
             quota_parte = imp / len(partecipanti) if len(partecipanti) > 0 else imp
             for p in partecipanti:
                 if p in saldi:
                     saldi[p] -= quota_parte
-        elif row["Tipo"] == "Rimborso":
+        elif row.get("Tipo") == "Rimborso":
             if paga in saldi:
                 saldi[paga] += imp
-            ricevente = row["Coinvolti"] if isinstance(row["Coinvolti"], str) else row["Coinvolti"][0]
-            if recevente in saldi:
-                saldi[recevente] -= imp
+            coinvolti_val = row.get("Coinvolti", "")
+            ricevente = coinvolti_val if isinstance(coinvolti_val, str) else (coinvolti_val[0] if coinvolti_val else "")
+            if ricevente in saldi:
+                saldi[ricevente] -= imp
 
 if not df_attivita.empty:
     for _, row in df_attivita.iterrows():
-        valore_lavoro = float(row["Totale Stimato (€)"])
+        valore_lavoro = float(pd.to_numeric(row.get("Totale Stimato (€)", 0.0), errors="coerce") or 0.0)
         saldi[io] += valore_lavoro
         quota_parte = valore_lavoro / len(soci)
         for s in soci:
@@ -183,12 +185,51 @@ if not df.empty or not df_attivita.empty:
             st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
 
 if not df_previste.empty:
-    with st.expander("📌 Visualizza Somme previste"):
-        st.dataframe(df_previste, use_container_width=True)
+    with st.expander("📌 Visualizza e modifica Somme previste"):
+        st.caption("Modifica i valori nelle celle o elimina righe, poi clicca su Salva modifiche.")
+        previste_mod = st.data_editor(
+            df_previste,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_previste"
+        )
+        if st.button("💾 Salva modifiche Somme previste"):
+            st.session_state.somme_previste = prevista_mod
+            st.success("Somme previste aggiornate!")
+            st.rerun()
 
 if not df.empty:
-    with st.expander("📜 Visualizza Storico Movimenti Reali (Spese/Entrate)"):
-        st.dataframe(df, use_container_width=True)
+    with st.expander("📜 Visualizza e modifica Storico Movimenti Reali (Spese/Entrate)"):
+        st.caption("Clicca su una cella per correggere importo, descrizione, data o chi ha pagato.")
+        movimenti_mod = st.data_editor(
+            df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_movimenti"
+        )
+        if st.button("💾 Salva modifiche Movimenti"):
+            st.session_state.transazioni = movimenti_mod
+            st.success("Movimenti reali aggiornati!")
+            st.rerun()
+
+if not df_attivita.empty:
+    with st.expander("🛠️ Gestisci Note operative"):
+        st.caption("Modifica ore, tariffa o attività, oppure rimuovi singole righe.")
+        attivita_mod = st.data_editor(
+            df_attivita,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_attivita"
+        )
+        if "Ore" in attivita_mod.columns and "Tariffa Oraria (€)" in attivita_mod.columns:
+            attivita_mod["Totale Stimato (€)"] = (
+                pd.to_numeric(attivita_mod["Ore"], errors="coerce").fillna(0.0)
+                * pd.to_numeric(attivita_mod["Tariffa Oraria (€)"], errors="coerce").fillna(0.0)
+            )
+        if st.button("💾 Salva modifiche Note operative"):
+            st.session_state.attivita_ore = attivita_mod
+            st.success("Note operative aggiornate!")
+            st.rerun()
 
 st.markdown("---")
 st.subheader("🖨️ Report per Tonino (Stampa / PDF ed Excel)")
@@ -215,7 +256,7 @@ if not df.empty:
             "Tipo": str(r.get("Tipo", "")),
             "Categoria": str(r.get("Categoria", "")),
             "Descrizione": str(r.get("Descrizione", "")),
-            "Importo (€)": round(float(r.get("Importo", 0.0)), 2),
+            "Importo (€)": round(float(pd.to_numeric(r.get("Importo", 0.0), errors="coerce") or 0.0), 2),
             "Pagato Da": str(r.get("Pagato Da", "")),
             "Coinvolti": str(r.get("Coinvolti", ""))
         })
@@ -235,7 +276,7 @@ if not df_previste.empty:
             "Descrizione": str(r.get("Descrizione", "")),
             "Categoria": str(r.get("Categoria", "")),
             "Stato": str(r.get("Stato", "")),
-            "Importo Previsto (€)": round(float(r.get("Importo Previsto", 0.0)), 2)
+            "Importo Previsto (€)": round(float(pd.to_numeric(r.get("Importo Previsto", 0.0), errors="coerce") or 0.0), 2)
         })
 df_previste_out = pd.DataFrame(voci_previste) if voci_previste else pd.DataFrame(
     columns=["Descrizione", "Categoria", "Stato", "Importo Previsto (€)"]
@@ -261,14 +302,16 @@ with col_rep2:
     righe_movimenti = ""
     if not df.empty:
         for _, r in df.iterrows():
-            righe_movimenti += f"<li>{r['Data']} – {r['Tipo']} ({r['Categoria']}): {r['Descrizione']} — <b>{float(r['Importo']):.2f} €</b> (Pagato da: {r['Pagato Da']})</li>"
+            imp_val = float(pd.to_numeric(r.get("Importo", 0.0), errors="coerce") or 0.0)
+            righe_movimenti += f"<li>{r.get('Data', '')} – {r.get('Tipo', '')} ({r.get('Categoria', '')}): {r.get('Descrizione', '')} — <b>{imp_val:.2f} €</b> (Pagato da: {r.get('Pagato Da', '')})</li>"
     else:
         righe_movimenti = "<li>Nessun movimento registrato</li>"
 
     righe_previste = ""
     if not df_previste.empty:
         for _, r in df_previste.iterrows():
-            righe_previste += f"<li>{r['Descrizione']} ({r['Categoria']}, {r['Stato']}): <b>{float(r['Importo Previsto']):.2f} €</b></li>"
+            prev_val = float(pd.to_numeric(r.get("Importo Previsto", 0.0), errors="coerce") or 0.0)
+            righe_previste += f"<li>{r.get('Descrizione', '')} ({r.get('Categoria', '')}, {r.get('Stato', '')}): <b>{prev_val:.2f} €</b></li>"
     else:
         righe_previste = "<li>Nessuna somma prevista</li>"
 
