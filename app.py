@@ -111,10 +111,10 @@ else:
                 "Tariffa Oraria (€)": m_tariffa,
                 "Totale Stimato (€)": tot_valore
           }
-          nuovo_mdf = pd.DataFrame([nuova_mano])
-          st.session_state.manodopera_privata = pd.concat([st.session_state.manodopera_privata, nuovo_mdf], ignore_index=True)
-          st.sidebar.success("Lavoro registrato e integrato nei calcoli di saldo!")
-          st.rerun()
+            nuovo_mdf = pd.DataFrame([nuova_mano])
+            st.session_state.manodopera_privata = pd.concat([st.session_state.manodopera_privata, nuovo_mdf], ignore_index=True)
+            st.sidebar.success("Lavoro registrato e integrato nei calcoli di saldo!")
+            st.rerun()
       else:
           st.sidebar.error("Compila correttamente i campi.")
 
