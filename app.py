@@ -141,11 +141,11 @@ if not df.empty:
         if row["Tipo"] == "Spesa":
             if paga in saldi:
                 saldi[paga] += imp
-             partecipanti = row["Coinvolti"].split(", ") if isinstance(row["Coinvolti"], str) else row["Coinvolti"]
-             quota_parte = imp / len(partecipanti) if len(partecipanti) > 0 else imp
-             for p in partecipanti:
-                 if p in saldi:
-                     saldi[p] -= quota_parte
+            partecipanti = row["Coinvolti"].split(", ") if isinstance(row["Coinvolti"], str) else row["Coinvolti"]
+            quota_parte = imp / len(partecipanti) if len(partecipanti) > 0 else imp
+            for p in partecipanti:
+                if p in saldi:
+                    saldi[p] -= quota_parte
          elif row["Tipo"] == "Rimborso":
              if paga in saldi:
                  saldi[paga] += imp
