@@ -63,13 +63,13 @@ if st.sidebar.button("Registra Operazione"):
             "Importo": importo,
             "Pagato Da": pagato_da,
             "Coinvolti": ", ".join(coinvolti) if isinstance(coinvolti, list) else coinvolti
-      }
-      nuovo_df = pd.DataFrame([nuova_riga])
-      st.session_state.transazioni = pd.concat([st.session_state.transazioni, nuovo_df], ignore_index=True)
-      st.sidebar.success("Operazione registrata!")
-      st.rerun()
-  else:
-      st.sidebar.error("Inserisci un importo maggiore di zero.")
+        }
+        nuovo_df = pd.DataFrame([nuova_riga])
+        st.session_state.transazioni = pd.concat([st.session_state.transazioni, nuovo_df], ignore_index=True)
+        st.sidebar.success("Operazione registrata!")
+        st.rerun()
+    else:
+        st.sidebar.error("Inserisci un importo maggiore di zero.")
 
 elif scelta_menu == "Voci Fantasma / Previste":
     st.sidebar.subheader("👻 Aggiungi Voce Fantasma")
