@@ -2,10 +2,10 @@ Import streamlit as st
 Import pandas as pd
 From datetime import date
 
-St.set_page_config(page_title=”Gestione Spese Barca”, page_icon=”⛵”, layout=”centered”)
+    St.set_page_config(page_title=”Gestione Spese Barca”, page_icon=”⛵”, layout=”centered”)
 
-St.title(“⛵ Gestione Spese Barca”)
-St.markdown(“Tieni traccia di entrate, spese condivise, voci previste e manodopera personale.”)[span_4](start_span)[span_4](end_span)
+    St.title(“⛵ Gestione Spese Barca”)
+    St.markdown(“Tieni traccia di entrate, spese condivise, voci previste e manodopera personale.”)[span_4](start_span)[span_4](end_span)
 
 If “transazioni” not in st.session_state:
     st.session_state.transazioni = pd.DataFrame(columns=[
