@@ -358,4 +358,7 @@ with col_rep2:
 
     st.download_button(
         label="🖨️ Scarica Report Stampa / PDF",
-        data=html_report.encode("
+        data=html_report.encode("utf-8"),
+        file_name=f"report_spese_barca_{date.today()}.html",
+        mime="text/html"
+    )
