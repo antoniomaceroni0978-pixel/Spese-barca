@@ -92,6 +92,7 @@ if st.sidebar.button("Aggiungi Voce Fantasma"):
         st.rerun()
 else:
     st.sidebar.error("Inserisci una descrizione e un importo valido.")
+    
 else:
     st.sidebar.subheader("🛠️ Registra Lavoro Personale")
     st.sidebar.info("Partecipa al calcolo dei saldi fra soci (diviso a metà), ma non appare come spesa nello storico.")
