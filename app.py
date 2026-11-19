@@ -23,7 +23,9 @@ if "attivita_ore" not in st.session_state:
         "Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"
     ])
 
-soci = ["Tu", "Socio"]
+io = "Antonio"
+socio = "Tonino"
+soci = [io, socio]
 
 st.sidebar.header("⚙️ Menu Operazioni")
 scelta_menu = st.sidebar.radio("Seleziona sezione", [
@@ -133,7 +135,7 @@ col1.metric("Spese Reali Totali", f"{totale_spese_reali:.2f} €")
 col2.metric("Somme previste", f"{totale_previste_attivo:.2f} €")
 col3.metric("Totale Complessivo", f"{totale_spese_reali + totale_previste_attivo:.2f} €")
 
-saldi = {socio: 0.0 for socio in soci}
+saldi = {io: 0.0, socio: 0.0}
 
 if not df.empty:
     for _, row in df.iterrows():
@@ -157,7 +159,7 @@ if not df.empty:
 if not df_attivita.empty:
     for _, row in df_attivita.iterrows():
         valore_lavoro = float(row["Totale Stimato (€)"])
-        saldi["Tu"] += valore_lavoro
+        saldi[io] += valore_lavoro
         quota_parte = valore_lavoro / len(soci)
         for s in soci:
             saldi[s] -= quota_parte
@@ -167,17 +169,17 @@ if not df.empty or not df_attivita.empty:
     st.markdown("---")
     s_col1, s_col2 = st.columns(2)
     with s_col1:
-        st.metric(label=f"Bilancio Finale {soci[0]}", value=f"{saldi[soci[0]]:.2f} €")
+        st.metric(label=f"Bilancio Finale {io}", value=f"{saldi[io]:.2f} €")
     with s_col2:
-        st.metric(label=f"Bilancio Finale {soci[1]}", value=f"{saldi[soci[1]]:.2f} €")
+        st.metric(label=f"Bilancio Finale {socio}", value=f"{saldi[socio]:.2f} €")
 
-    diff = saldi[soci[0]] - saldi[soci[1]]
+    diff = saldi[io] - saldi[socio]
     if abs(diff) > 0.05:
         if diff > 0:
-            testo_regolamento = f"{soci[1]} deve dare {diff / 2:.2f} € a {soci[0]}."
+            testo_regolamento = f"{socio} deve dare {diff / 2:.2f} € a {io}."
             st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
         else:
-            testo_regolamento = f"{soci[0]} deve dare {abs(diff) / 2:.2f} € a {soci[1]}."
+            testo_regolamento = f"{io} deve dare {abs(diff) / 2:.2f} € a {socio}."
             st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
 
 if not df_previste.empty:
@@ -189,7 +191,7 @@ if not df.empty:
         st.dataframe(df, use_container_width=True)
 
 st.markdown("---")
-st.subheader("🖨️ Report per il socio (Stampa / PDF ed Excel)")
+st.subheader("🖨️ Report per Tonino (Stampa / PDF ed Excel)")
 st.markdown("Esporta un riepilogo pulito con tutti i record, somme previste e conguaglio.")
 
 buffer_excel = BytesIO()
@@ -198,87 +200,11 @@ riepilogo_dati = pd.DataFrame([
     {"Voce": "Spese Reali Totali (€)", "Valore": round(float(totale_spese_reali), 2)},
     {"Voce": "Somme Previste Attive (€)", "Valore": round(float(totale_previste_attivo), 2)},
     {"Voce": "Totale Complessivo (€)", "Valore": round(float(totale_spese_reali + totale_previste_attivo), 2)},
-    {"Voce": f"Bilancio Finale {soci[0]} (€)", "Valore": round(float(saldi[soci[0]]), 2)},
-    {"Voce": f"Bilancio Finale {soci[1]} (€)", "Valore": round(float(saldi[soci[1]]), 2)},
+    {"Voce": f"Bilancio Finale {io} (€)", "Valore": round(float(saldi[io]), 2)},
+    {"Voce": f"Bilancio Finale {socio} (€)", "Valore": round(float(saldi[socio]), 2)},
     {"Voce": "Regolamento Conti", "Valore": testo_regolamento if testo_regolamento else "Conti in pareggio"}
 ])
 
 df_previste_out = df_previste.copy() if not df_previste.empty else pd.DataFrame(columns=["Descrizione", "Importo Previsto", "Categoria", "Stato"])
 df_out = df.copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"])
-df_spese_out = df[df["Tipo"] == "Spesa"].copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"])
-
-with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
-    riepilogo_dati.to_excel(writer, sheet_name="Riepilogo", index=False)
-    df_out.to_excel(writer, sheet_name="Tutti i Movimenti", index=False)
-    df_spese_out.to_excel(writer, sheet_name="Solo Spese", index=False)
-    df_previste_out.to_excel(writer, sheet_name="Somme Previste", index=False)
-
-col_rep1, col_rep2 = st.columns(2)
-
-with col_rep1:
-    st.download_button(
-        label="📊 Scarica Report Excel (.xlsx)",
-        data=buffer_excel.getvalue(),
-        file_name=f"report_spese_barca_{date.today()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-with col_rep2:
-    righe_movimenti = ""
-    if not df.empty:
-        for _, r in df.iterrows():
-            righe_movimenti += f"<li>{r['Data']} – {r['Tipo']} ({r['Categoria']}): {r['Descrizione']} — <b>{float(r['Importo']):.2f} €</b> (Pagato da: {r['Pagato Da']})</li>"
-    else:
-        righe_movimenti = "<li>Nessun movimento registrato</li>"
-
-    righe_previste = ""
-    if not df_previste.empty:
-        for _, r in df_previste.iterrows():
-            righe_previste += f"<li>{r['Descrizione']} ({r['Categoria']}, {r['Stato']}): <b>{float(r['Importo Previsto']):.2f} €</b></li>"
-    else:
-        righe_previste = "<li>Nessuna somma prevista</li>"
-
-    html_report = f"""
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        body {{ font-family: Arial, sans-serif; padding: 24px; color: #222; }}
-        h1 {{ margin-bottom: 4px; }}
-        .data {{ color: #666; margin-bottom: 20px; }}
-        .box {{ border: 1px solid #ccc; padding: 14px; border-radius: 8px; margin-bottom: 18px; }}
-        button {{ padding: 10px 16px; font-size: 15px; cursor: pointer; margin-bottom: 20px; }}
-        @media print {{ button {{ display: none; }} }}
-      </style>
-    </head>
-    <body>
-      <button onclick="window.print()">🖨️ Stampa / Salva PDF</button>
-      <h1>Report Spese Barca</h1>
-      <div class="data">Data report: {date.today()}</div>
-      <div class="box">
-        <b>Riepilogo totali</b><br>
-        Spese reali totali: <b>{totale_spese_reali:.2f} €</b><br>
-        Somme previste: <b>{totale_previste_attivo:.2f} €</b><br>
-        Totale complessivo: <b>{totale_spese_reali + totale_previste_attivo:.2f} €</b><br><br>
-        Bilancio {soci[0]}: <b>{saldi[soci[0]]:.2f} €</b><br>
-        Bilancio {soci[1]}: <b>{saldi[soci[1]]:.2f} €</b><br>
-        {f"<p><b>Regolamento conti:</b> {testo_regolamento}</p>" if testo_regolamento else ""}
-      </div>
-      <div class="box">
-        <b>Somme previste</b>
-        <ul>{righe_previste}</ul>
-      </div>
-      <div class="box">
-        <b>Movimenti reali</b>
-        <ul>{righe_movimenti}</ul>
-      </div>
-    </body>
-    </html>
-    """
-
-    st.download_button(
-        label="🖨️ Scarica Report Stampa / PDF",
-        data=html_report.encode("utf-8"),
-        file_name=f"report_spese_barca_{date.today()}.html",
-        mime="text/html"
-    )
+df_spese_out = df[df["Tipo"] == "Spesa"].copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pag
