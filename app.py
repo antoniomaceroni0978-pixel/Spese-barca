@@ -90,8 +90,8 @@ if st.sidebar.button("Aggiungi Voce Fantasma"):
         st.session_state.voci_fantasma = pd.concat([st.session_state.voci_fantasma, nuovo_vdf], ignore_index=True)
         st.sidebar.success("Voce fantasma aggiunta!")
         st.rerun()
-else:
-    st.sidebar.error("Inserisci una descrizione e un importo valido.")
+    else:
+        st.sidebar.error("Inserisci una descrizione e un importo valido.")
     
 else:
     st.sidebar.subheader("🛠️ Registra Lavoro Personale")
