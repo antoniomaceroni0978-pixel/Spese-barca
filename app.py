@@ -146,7 +146,7 @@ if not df.empty:
             for p in partecipanti:
                 if p in saldi:
                     saldi[p] -= quota_parte
-         elif row["Tipo"] == "Rimborso":
+        elif row["Tipo"] == "Rimborso":
              if paga in saldi:
                  saldi[paga] += imp
              ricevente = row["Coinvolti"] if isinstance(row["Coinvolti"], str) else row["Coinvolti"][0]
