@@ -85,7 +85,7 @@ if st.sidebar.button("Aggiungi Voce Fantasma"):
             "Importo Previsto": f_importo,
             "Categoria": f_cat,
             "Stato": "Attiva" if f_attiva else "Disattivata"
-       }
+        }
        nuovo_vdf = pd.DataFrame([nuova_voce])
        st.session_state.voci_fantasma = pd.concat([st.session_state.voci_fantasma, nuovo_vdf], ignore_index=True)
        st.sidebar.success("Voce fantasma aggiunta!")
