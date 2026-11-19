@@ -187,8 +187,9 @@ if not df.empty or not df_attivita.empty:
 if not df_previste.empty:
     with st.expander("📌 Visualizza e modifica Somme previste"):
         st.caption("Modifica i valori nelle celle o elimina righe, poi clicca su Salva modifiche.")
-        previste_mod = st.data_editor(
-            df_previste,
+        prevista_mod = df_previste.copy()
+        prevista_mod = st.data_editor(
+            prevista_mod,
             num_rows="dynamic",
             use_container_width=True,
             key="editor_previste"
@@ -201,8 +202,9 @@ if not df_previste.empty:
 if not df.empty:
     with st.expander("📜 Visualizza e modifica Storico Movimenti Reali (Spese/Entrate)"):
         st.caption("Clicca su una cella per correggere importo, descrizione, data o chi ha pagato.")
+        movimenti_mod = df.copy()
         movimenti_mod = st.data_editor(
-            df,
+            movimenti_mod,
             num_rows="dynamic",
             use_container_width=True,
             key="editor_movimenti"
@@ -215,8 +217,9 @@ if not df.empty:
 if not df_attivita.empty:
     with st.expander("🛠️ Gestisci Note operative"):
         st.caption("Modifica ore, tariffa o attività, oppure rimuovi singole righe.")
+        attivita_mod = df_attivita.copy()
         attivita_mod = st.data_editor(
-            df_attivita,
+            attivita_mod,
             num_rows="dynamic",
             use_container_width=True,
             key="editor_attivita"
@@ -355,7 +358,4 @@ with col_rep2:
 
     st.download_button(
         label="🖨️ Scarica Report Stampa / PDF",
-        data=html_report.encode("utf-8"),
-        file_name=f"report_spese_barca_{date.today()}.html",
-        mime="text/html"
-    )
+        data=html_report.encode("
