@@ -189,7 +189,7 @@ if not df_privata.empty:
     p_col1.metric("Totale Ore Lavorate", f"{tot_ore_lavoro} ore")
     p_col2.metric("Valore Totale Riconosciuto", f"{tot_valore_lavoro:.2f} €")
     
-    if st.button("Cancella Storico Manodopera"):
+if st.button("Cancella Storico Manodopera"):
 st.session_state.manodopera_privata = pd.DataFrame(columns=["Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"])
 st.rerun()
 else:
