@@ -101,15 +101,15 @@ else:
     m_ore = st.sidebar.number_input("Ore impiegate", min_value=0.5, step=0.5, value=2.0, key="m_ore")
     m_tariffa = st.sidebar.number_input("Valore / Tariffa Oraria (€/h)", min_value=0.0, step=5.0, value=25.0, key="m_tariffa")
 
-   if st.sidebar.button("Registra Manodopera Privata"):
-       if m_desc and m_ore > 0:
-           tot_valore = m_ore * m_tariffa
-           nuova_mano = {
-               "Data": m_data,
-               "Attività / Lavoro": m_desc,
-               "Ore": m_ore,
-               "Tariffa Oraria (€)": m_tariffa,
-               "Totale Stimato (€)": tot_valore
+    if st.sidebar.button("Registra Manodopera Privata"):
+        if m_desc and m_ore > 0:
+            tot_valore = m_ore * m_tariffa
+            nuova_mano = {
+                "Data": m_data,
+                "Attività / Lavoro": m_desc,
+                "Ore": m_ore,
+                "Tariffa Oraria (€)": m_tariffa,
+                "Totale Stimato (€)": tot_valore
          }
          nuovo_mdf = pd.DataFrame([nuova_mano])
          st.session_state.manodopera_privata = pd.concat([st.session_state.manodopera_privata, nuovo_mdf], ignore_index=True)
