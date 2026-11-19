@@ -207,4 +207,4 @@ riepilogo_dati = pd.DataFrame([
 
 df_previste_out = df_previste.copy() if not df_previste.empty else pd.DataFrame(columns=["Descrizione", "Importo Previsto", "Categoria", "Stato"])
 df_out = df.copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"])
-df_spese_out = df[df["Tipo"] == "Spesa"].copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pag
+df_spese_out = df[df["Tipo"] == "Spesa"].copy() if not df.empty else pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"])
