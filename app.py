@@ -161,6 +161,7 @@ if not df_attivita.empty:
         for s in soci:
             saldi[s] -= quota_parte
 
+testo_regolamento = ""
 if not df.empty or not df_attivita.empty:
     st.markdown("---")
     s_col1, s_col2 = st.columns(2)
@@ -172,28 +173,11 @@ if not df.empty or not df_attivita.empty:
     diff = saldi[soci[0]] - saldi[soci[1]]
     if abs(diff) > 0.05:
         if diff > 0:
-            st.info(f"💡 **Regolamento conti:** {soci[1]} deve dare **{diff / 2:.2f} €** a {soci[0]}.")
+            testo_regolamento = f"{soci[1]} deve dare {diff / 2:.2f} € a {soci[0]}."
+            st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
         else:
-            st.info(f"💡 **Regolamento conti:** {soci[0]} deve dare **{abs(diff) / 2:.2f} €** a {soci[1]}.")
-
-st.markdown("---")
-st.subheader("🛠️ Dettaglio attività e ore")
-st.markdown("Riepilogo delle attività registrate e delle relative ore.")
-
-if not df_attivita.empty:
-    st.dataframe(df_attivita, use_container_width=True)
-    tot_ore_lavoro = df_attivita["Ore"].sum()
-    tot_valore_lavoro = df_attivita["Totale Stimato (€)"].sum()
-
-    p_col1, p_col2 = st.columns(2)
-    p_col1.metric("Totale Ore", f"{tot_ore_lavoro} ore")
-    p_col2.metric("Valore Attività", f"{tot_valore_lavoro:.2f} €")
-
-    if st.button("Svuota elenco attività"):
-        st.session_state.attivita_ore = pd.DataFrame(columns=["Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"])
-        st.rerun()
-else:
-    st.info("Nessuna attività registrata.")
+            testo_regolamento = f"{soci[0]} deve dare {abs(diff) / 2:.2f} € a {soci[1]}."
+            st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
 
 if not df_previste.empty:
     with st.expander("📌 Visualizza Somme previste"):
@@ -205,3 +189,67 @@ if not df.empty:
         if st.button("Esporta movimenti reali in CSV"):
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button("Scarica CSV", data=csv, file_name="spese_barca.csv", mime="text/csv")
+
+st.markdown("---")
+st.subheader("🖨️ Report da stampare per il socio")
+st.markdown("Genera un riepilogo pulito con spese, somme previste e conguaglio, senza mostrare i dettagli delle attività.")
+
+if st.button("Prepara report stampabile"):
+    righe_movimenti = ""
+    if not df.empty:
+        for _, r in df.iterrows():
+            righe_movimenti += f"<li>{r['Data']} – {r['Tipo']} ({r['Categoria']}): {r['Descrizione']} — <b>{float(r['Importo']):.2f} €</b> (Pagato da: {r['Pagato Da']})</li>"
+    else:
+        righe_movimenti = "<li>Nessun movimento registrato</li>"
+
+    righe_previste = ""
+    if not df_previste.empty:
+        for _, r in df_previste.iterrows():
+            righe_previste += f"<li>{r['Descrizione']} ({r['Categoria']}, {r['Stato']}): <b>{float(r['Importo Previsto']):.2f} €</b></li>"
+    else:
+        righe_previste = "<li>Nessuna somma prevista</li>"
+
+    html_report = f"""
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 24px; color: #222; }}
+        h1 {{ margin-bottom: 4px; }}
+        .data {{ color: #666; margin-bottom: 20px; }}
+        .box {{ border: 1px solid #ccc; padding: 14px; border-radius: 8px; margin-bottom: 18px; }}
+        button {{ padding: 10px 16px; font-size: 15px; cursor: pointer; margin-bottom: 20px; }}
+        @media print {{ button {{ display: none; }} }}
+      </style>
+    </head>
+    <body>
+      <button onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+      <h1>Report Spese Barca</h1>
+      <div class="data">Data report: {date.today()}</div>
+      <div class="box">
+        <b>Riepilogo totali</b><br>
+        Spese reali totali: <b>{totale_spese_reali:.2f} €</b><br>
+        Somme previste: <b>{totale_previste_attivo:.2f} €</b><br>
+        Totale complessivo: <b>{totale_spese_reali + totale_previste_attivo:.2f} €</b><br><br>
+        Bilancio {soci[0]}: <b>{saldi[soci[0]]:.2f} €</b><br>
+        Bilancio {soci[1]}: <b>{saldi[soci[1]]:.2f} €</b><br>
+        {f"<p><b>Regolamento conti:</b> {testo_regolamento}</p>" if testo_regolamento else ""}
+      </div>
+      <div class="box">
+        <b>Somme previste</b>
+        <ul>{righe_previste}</ul>
+      </div>
+      <div class="box">
+        <b>Movimenti reali</b>
+        <ul>{righe_movimenti}</ul>
+      </div>
+    </body>
+    </html>
+    """
+
+    st.download_button(
+        label="⬇️ Scarica report da aprire e stampare",
+        data=html_report.encode("utf-8"),
+        file_name=f"report_spese_barca_{date.today()}.html",
+        mime="text/html"
+    )
