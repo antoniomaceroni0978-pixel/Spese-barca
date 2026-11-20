@@ -56,7 +56,8 @@ st.sidebar.header("⚙️ Menu Operazioni")
 scelta_menu = st.sidebar.radio("Seleziona sezione", [
     "Registra Operazione",
     "Somme previste",
-    "🛠️ Note operative"
+    "🛠️ Note operative",
+    "📥 Importa da Excel"
 ])
 
 if scelta_menu == "Registra Operazione":
@@ -121,7 +122,7 @@ elif scelta_menu == "Somme previste":
         else:
             st.sidebar.error("Inserisci una descrizione e un importo valido.")
 
-else:
+elif scelta_menu == "🛠️ Note operative":
     st.sidebar.subheader("🛠️ Registra attività")
     st.sidebar.info("Le attività registrate qui vengono considerate nel riepilogo generale dei conti.")
     m_data = st.sidebar.date_input("Data attività", date.today(), key="m_data")
@@ -145,6 +146,9 @@ else:
             st.rerun()
         else:
             st.sidebar.error("Compila correttamente i campi.")
+
+else:
+    st.sidebar.info("Carica il tuo file Excel (.xlsx) nell'area centrale per importare le operazioni.")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("💾 Salva / Ripristina Dati")
@@ -183,6 +187,126 @@ if file_caricato is not None:
             st.rerun()
         except Exception as e:
             st.sidebar.error(f"File non valido: {e}")
+
+if scelta_menu == "📥 Importa da Excel":
+    st.markdown("---")
+    st.subheader("📥 Importa Storico Operazioni da Excel (.xlsx)")
+    st.markdown("Carica il file Excel dove hai registrato le spese: potrai abbinare le colonne del tuo foglio a quelle dell'app prima di importare.")
+
+    excel_file = st.file_uploader("Seleziona file Excel (.xlsx)", type=["xlsx"], key="upload_excel_operazioni")
+    if excel_file is not None:
+        try:
+            xl = pd.ExcelFile(excel_file, engine="openpyxl")
+            foglio_scelto = st.selectbox("Seleziona foglio del file Excel", xl.sheet_names)
+            df_raw_excel = xl.parse(foglio_scelto)
+
+            if df_raw_excel.empty:
+                st.warning("Il foglio selezionato è vuoto.")
+            else:
+                st.caption("Anteprima delle prime righe del tuo file Excel:")
+                st.dataframe(df_raw_excel.head(5), use_container_width=True)
+
+                opzioni_colonne = ["— Nessuna / Valore predefinito —"] + list(df_raw_excel.columns)
+
+                def indice_suggerito(candidati):
+                    for idx, nome_col in enumerate(df_raw_excel.columns, start=1):
+                        basso = str(nome_col).strip().lower()
+                        if any(c in basso for c in candidati):
+                            return idx
+                    return 0
+
+                c_m1, c_m2 = st.columns(2)
+                with c_m1:
+                    col_data = st.selectbox("Colonna Data", opzioni_colonne, index=indice_suggerito(["data", "date"]))
+                    col_tipo = st.selectbox("Colonna Tipo (Spesa / Entrata / Rimborso)", opzioni_colonne, index=indice_suggerito(["tipo", "movimento"]))
+                    col_cat = st.selectbox("Colonna Categoria", opzioni_colonne, index=indice_suggerito(["categ", "voce"]))
+                    col_desc = st.selectbox("Colonna Descrizione", opzioni_colonne, index=indice_suggerito(["descr", "nota", "dettagl"]))
+                with c_m2:
+                    col_imp = st.selectbox("Colonna Importo (€)", opzioni_colonne, index=indice_suggerito(["import", "euro", "€", "totale", "cifra"]))
+                    col_pagato = st.selectbox("Colonna Pagato Da", opzioni_colonne, index=indice_suggerito(["pagat", "chi", "socio", "autore"]))
+                    col_coinv = st.selectbox("Colonna Coinvolti", opzioni_colonne, index=indice_suggerito(["coinvolt", "divis", "tra"]))
+                    tipo_default = st.selectbox("Tipo predefinito (se manca la colonna Tipo)", ["Spesa", "Entrata", "Rimborso tra soci"])
+
+                modalita_import = st.radio(
+                    "Come vuoi applicare i dati importati?",
+                    ["Aggiungi ai movimenti già presenti", "Sostituisci tutti i movimenti attuali"],
+                    horizontal=True
+                )
+
+                if st.button("✅ Importa operazioni nell'app"):
+                    righe_importate = []
+                    for _, r in df_raw_excel.iterrows():
+                        imp_num = 0.0
+                        if col_imp != "— Nessuna / Valore predefinito —":
+                            val_raw = str(r.get(col_imp, "")).replace("€", "").replace(",", ".").strip()
+                            imp_num = abs(float(pd.to_numeric(val_raw, errors="coerce") or 0.0))
+
+                        desc_val = ""
+                        if col_desc != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_desc)):
+                            desc_val = str(r.get(col_desc)).strip()
+
+                        if imp_num == 0.0 and not desc_val:
+                            continue
+
+                        data_val = str(date.today())
+                        if col_data != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_data)):
+                            dt_conv = pd.to_datetime(r.get(col_data), errors="coerce")
+                            data_val = str(dt_conv.date()) if pd.notna(dt_conv) else str(r.get(col_data)).strip()
+
+                        tipo_val = tipo_default
+                        if col_tipo != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_tipo)):
+                            t_txt = str(r.get(col_tipo)).strip().lower()
+                            if "entrat" in t_txt:
+                                tipo_val = "Entrata"
+                            elif "rimbors" in t_txt:
+                                tipo_val = "Rimborso tra soci"
+                            elif "spes" in t_txt:
+                                tipo_val = "Spesa"
+                            elif str(r.get(col_tipo)).strip():
+                                tipo_val = str(r.get(col_tipo)).strip()
+
+                        cat_val = "Altro" if tipo_val == "Spesa" else ("Entrata Comune (es. Charter)" if tipo_val == "Entrata" else "Rimborso")
+                        if col_cat != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_cat)) and str(r.get(col_cat)).strip():
+                            cat_val = str(r.get(col_cat)).strip()
+
+                        pag_val = io if tipo_val == "Spesa" else ("Cassa Comune" if tipo_val == "Entrata" else io)
+                        if col_pagato != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_pagato)) and str(r.get(col_pagato)).strip():
+                            p_txt = str(r.get(col_pagato)).strip()
+                            if p_txt.lower() in ("antonio", "io", "a"):
+                                pag_val = io
+                            elif p_txt.lower() in ("tonino", "socio", "t"):
+                                pag_val = socio
+                            else:
+                                pag_val = p_txt
+
+                        coinv_val = ", ".join(soci)
+                        if col_coinv != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_coinv)) and str(r.get(col_coinv)).strip():
+                            coinv_val = str(r.get(col_coinv)).strip()
+
+                        righe_importate.append({
+                            "Data": data_val,
+                            "Tipo": tipo_val,
+                            "Categoria": cat_val,
+                            "Descrizione": desc_val,
+                            "Importo": round(imp_num, 2),
+                            "Pagato Da": pag_val,
+                            "Coinvolti": coinv_val,
+                        })
+
+                    if not righe_importate:
+                        st.error("Nessuna riga valida trovata: controlla la colonna Importo o Descrizione.")
+                    else:
+                        df_import = pd.DataFrame(righe_importate, columns=COLONNE_TRANSAZIONI)
+                        if modalita_import == "Sostituisci tutti i movimenti attuali":
+                            st.session_state.transazioni = df_import
+                        else:
+                            st.session_state.transazioni = pd.concat(
+                                [st.session_state.transazioni, df_import], ignore_index=True
+                            )
+                        st.success(f"Importate {len(righe_importate)} operazioni dal file Excel!")
+                        st.rerun()
+        except Exception as e:
+            st.error(f"Impossibile leggere il file Excel: {e}")
 
 st.subheader("📊 Situazione Finanziaria Condivisa")
 
