@@ -2,30 +2,55 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from io import BytesIO
+import json
 
 st.set_page_config(page_title="Gestione Spese Barca", page_icon="⛵", layout="centered")
 
-st.title("⛵ Gestione Spese Barca")
-st.markdown("Tieni traccia di entrate, spese condivise, somme previste e attività.")
+
+def verifica_accesso():
+    password_corretta = st.secrets.get("APP_PASSWORD", "")
+    if not password_corretta:
+        return True
+
+    if st.session_state.get("autenticato", False):
+        return True
+
+    st.subheader("🔒 Accesso Riservato")
+    st.caption("Inserisci la password per accedere alla gestione spese della barca.")
+    pwd_inserita = st.text_input("Password", type="password", key="input_pwd")
+
+    if st.button("Entra"):
+        if pwd_inserita == password_corretta:
+            st.session_state.autenticato = True
+            st.rerun()
+        else:
+            st.error("Password non corretta.")
+    return False
+
+
+if not verifica_accesso():
+    st.stop()
+
+
+COLONNE_TRANSAZIONI = ["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"]
+COLONNE_PREVISTE = ["Descrizione", "Importo Previsto", "Categoria", "Stato"]
+COLONNE_ATTIVITA = ["Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"]
 
 if "transazioni" not in st.session_state:
-    st.session_state.transazioni = pd.DataFrame(columns=[
-        "Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"
-    ])
+    st.session_state.transazioni = pd.DataFrame(columns=COLONNE_TRANSAZIONI)
 
 if "somme_previste" not in st.session_state:
-    st.session_state.somme_previste = pd.DataFrame(columns=[
-        "Descrizione", "Importo Previsto", "Categoria", "Stato"
-    ])
+    st.session_state.somme_previste = pd.DataFrame(columns=COLONNE_PREVISTE)
 
 if "attivita_ore" not in st.session_state:
-    st.session_state.attivita_ore = pd.DataFrame(columns=[
-        "Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"
-    ])
+    st.session_state.attivita_ore = pd.DataFrame(columns=COLONNE_ATTIVITA)
 
 io = "Antonio"
 socio = "Tonino"
 soci = [io, socio]
+
+st.title("⛵ Gestione Spese Barca")
+st.markdown("Tieni traccia di entrate, spese condivise, somme previste e attività.")
 
 st.sidebar.header("⚙️ Menu Operazioni")
 scelta_menu = st.sidebar.radio("Seleziona sezione", [
@@ -59,11 +84,11 @@ if scelta_menu == "Registra Operazione":
     if st.sidebar.button("Registra Operazione"):
         if importo > 0:
             nuova_riga = {
-                "Data": data,
+                "Data": str(data),
                 "Tipo": tipo,
                 "Categoria": categoria,
                 "Descrizione": descrizione,
-                "Importo": importo,
+                "Importo": float(importo),
                 "Pagato Da": pagato_da,
                 "Coinvolti": ", ".join(coinvolti) if isinstance(coinvolti, list) else coinvolti
             }
@@ -85,7 +110,7 @@ elif scelta_menu == "Somme previste":
         if f_importo > 0 and f_desc.strip():
             nuova_voce = {
                 "Descrizione": f_desc.strip(),
-                "Importo Previsto": f_importo,
+                "Importo Previsto": float(f_importo),
                 "Categoria": f_cat,
                 "Stato": "Attiva" if f_attiva else "Disattivata"
             }
@@ -106,12 +131,12 @@ else:
 
     if st.sidebar.button("Registra attività"):
         if m_desc.strip() and m_ore > 0:
-            tot_valore = m_ore * m_tariffa
+            tot_valore = float(m_ore * m_tariffa)
             nuova_mano = {
-                "Data": m_data,
+                "Data": str(m_data),
                 "Attività / Lavoro": m_desc.strip(),
-                "Ore": m_ore,
-                "Tariffa Oraria (€)": m_tariffa,
+                "Ore": float(m_ore),
+                "Tariffa Oraria (€)": float(m_tariffa),
                 "Totale Stimato (€)": tot_valore
             }
             nuovo_mdf = pd.DataFrame([nuova_mano])
@@ -120,6 +145,44 @@ else:
             st.rerun()
         else:
             st.sidebar.error("Compila correttamente i campi.")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Salva / Ripristina Dati")
+backup_payload = {
+    "transazioni": st.session_state.transazioni.fillna("").to_dict(orient="records"),
+    "somme_previste": st.session_state.somme_previste.fillna("").to_dict(orient="records"),
+    "attivita_ore": st.session_state.attivita_ore.fillna("").to_dict(orient="records"),
+}
+st.sidebar.download_button(
+    label="⬇️ Scarica Backup (.json)",
+    data=json.dumps(backup_payload, ensure_ascii=False, indent=2).encode("utf-8"),
+    file_name=f"backup_spese_barca_{date.today()}.json",
+    mime="application/json"
+)
+
+file_caricato = st.sidebar.file_uploader("⬆️ Ripristina da Backup (.json)", type=["json"], key="upload_backup")
+if file_caricato is not None:
+    if st.sidebar.button("Ripristina dati dal file"):
+        try:
+            dati_rip = json.loads(file_caricato.getvalue().decode("utf-8"))
+            for chiave, cols in [
+                ("transazioni", COLONNE_TRANSAZIONI),
+                ("somme_previste", COLONNE_PREVISTE),
+                ("attivita_ore", COLONNE_ATTIVITA),
+            ]:
+                records = dati_rip.get(chiave, [])
+                if records:
+                    df_tmp = pd.DataFrame(records)
+                    for c in cols:
+                        if c not in df_tmp.columns:
+                            df_tmp[c] = ""
+                    st.session_state[chiave] = df_tmp[cols]
+                else:
+                    st.session_state[chiave] = pd.DataFrame(columns=cols)
+            st.sidebar.success("Dati ripristinati!")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"File non valido: {e}")
 
 st.subheader("📊 Situazione Finanziaria Condivisa")
 
@@ -187,9 +250,8 @@ if not df.empty or not df_attivita.empty:
 if not df_previste.empty:
     with st.expander("📌 Visualizza e modifica Somme previste"):
         st.caption("Modifica i valori nelle celle o elimina righe, poi clicca su Salva modifiche.")
-        prevista_mod = df_previste.copy()
         prevista_mod = st.data_editor(
-            prevista_mod,
+            df_previste.copy(),
             num_rows="dynamic",
             use_container_width=True,
             key="editor_previste"
@@ -202,9 +264,8 @@ if not df_previste.empty:
 if not df.empty:
     with st.expander("📜 Visualizza e modifica Storico Movimenti Reali (Spese/Entrate)"):
         st.caption("Clicca su una cella per correggere importo, descrizione, data o chi ha pagato.")
-        movimenti_mod = df.copy()
         movimenti_mod = st.data_editor(
-            movimenti_mod,
+            df.copy(),
             num_rows="dynamic",
             use_container_width=True,
             key="editor_movimenti"
@@ -217,9 +278,8 @@ if not df.empty:
 if not df_attivita.empty:
     with st.expander("🛠️ Gestisci Note operative"):
         st.caption("Modifica ore, tariffa o attività, oppure rimuovi singole righe.")
-        attivita_mod = df_attivita.copy()
         attivita_mod = st.data_editor(
-            attivita_mod,
+            df_attivita.copy(),
             num_rows="dynamic",
             use_container_width=True,
             key="editor_attivita"
