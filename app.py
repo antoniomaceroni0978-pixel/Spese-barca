@@ -1,548 +1,657 @@
-import streamlit as st
-import pandas as pd
-from datetime import date
-from io import BytesIO
-import json
-
-st.set_page_config(page_title="Gestione Spese Barca", page_icon="⛵", layout="centered")
-
-
-def verifica_accesso():
-    password_corretta = st.secrets.get("APP_PASSWORD", "")
-    if not password_corretta:
-        return True
-
-    if st.session_state.get("autenticato", False):
-        return True
-
-    st.subheader("🔒 Accesso Riservato")
-    st.caption("Inserisci la password per accedere alla gestione spese della barca.")
-    pwd_inserita = st.text_input("Password", type="password", key="input_pwd")
-
-    if st.button("Entra"):
-        if pwd_inserita == password_corretta:
-            st.session_state.autenticato = True
-            st.rerun()
-        else:
-            st.error("Password non corretta.")
-    return False
-
-
-if not verifica_accesso():
-    st.stop()
-
-
-COLONNE_TRANSAZIONI = ["Data", "Tipo", "Categoria", "Descrizione", "Importo", "Pagato Da", "Coinvolti"]
-COLONNE_PREVISTE = ["Descrizione", "Importo Previsto", "Categoria", "Stato"]
-COLONNE_ATTIVITA = ["Data", "Attività / Lavoro", "Ore", "Tariffa Oraria (€)", "Totale Stimato (€)"]
-
-if "transazioni" not in st.session_state:
-    st.session_state.transazioni = pd.DataFrame(columns=COLONNE_TRANSAZIONI)
-
-if "somme_previste" not in st.session_state:
-    st.session_state.somme_previste = pd.DataFrame(columns=COLONNE_PREVISTE)
-
-if "attivita_ore" not in st.session_state:
-    st.session_state.attivita_ore = pd.DataFrame(columns=COLONNE_ATTIVITA)
-
-io = "Antonio"
-socio = "Tonino"
-soci = [io, socio]
-
-st.title("⛵ Gestione Spese Barca")
-st.markdown("Tieni traccia di entrate, spese condivise, somme previste e attività.")
-
-st.sidebar.header("⚙️ Menu Operazioni")
-scelta_menu = st.sidebar.radio("Seleziona sezione", [
-    "Registra Operazione",
-    "Somme previste",
-    "🛠️ Note operative",
-    "📥 Importa da Excel"
-])
-
-if scelta_menu == "Registra Operazione":
-    st.sidebar.subheader("➕ Nuova Operazione Reale")
-    tipo = st.sidebar.selectbox("Tipo di operazione", ["Spesa", "Entrata", "Rimborso tra soci"])
-    data = st.sidebar.date_input("Data", date.today())
-    importo = st.sidebar.number_input("Importo (€)", min_value=0.0, step=10.0, format="%.2f")
-    descrizione = st.sidebar.text_input("Descrizione", value="")
-
-    if tipo == "Spesa":
-        categoria = st.sidebar.selectbox("Categoria", ["Carburante", "Ormeggio", "Manutenzione Ordinaria", "Manutenzione Straordinaria", "Assicurazione", "Altro"])
-        pagato_da = st.sidebar.selectbox("Pagato da chi?", soci)
-        coinvolti = st.sidebar.multiselect("Diviso tra", soci, default=soci)
-    elif tipo == "Entrata":
-        categoria = "Entrata Comune (es. Charter)"
-        pagato_da = "Cassa Comune"
-        coinvolti = soci
-    else:
-        categoria = "Rimborso"
-        pagato_da = st.sidebar.selectbox("Chi ha fatto il bonifico/pagamento?", soci)
-        ricevuto_da = [s for s in soci if s != pagato_da][0]
-        coinvolti = [ricevuto_da]
-        descrizione = f"Rimborso da {pagato_da} a {ricevuto_da}"
-
-    if st.sidebar.button("Registra Operazione"):
-        if importo > 0:
-            nuova_riga = {
-                "Data": str(data),
-                "Tipo": tipo,
-                "Categoria": categoria,
-                "Descrizione": descrizione,
-                "Importo": float(importo),
-                "Pagato Da": pagato_da,
-                "Coinvolti": ", ".join(coinvolti) if isinstance(coinvolti, list) else coinvolti
-            }
-            nuovo_df = pd.DataFrame([nuova_riga])
-            st.session_state.transazioni = pd.concat([st.session_state.transazioni, nuovo_df], ignore_index=True)
-            st.sidebar.success("Operazione registrata!")
-            st.rerun()
-        else:
-            st.sidebar.error("Inserisci un importo maggiore di zero.")
-
-elif scelta_menu == "Somme previste":
-    st.sidebar.subheader("📌 Aggiungi somma prevista")
-    f_desc = st.sidebar.text_input("Nome voce (es. Assicurazione Annuale)", value="")
-    f_importo = st.sidebar.number_input("Importo previsto (€)", min_value=0.0, step=50.0, value=0.0, format="%.2f")
-    f_cat = st.sidebar.selectbox("Categoria", ["Assicurazione", "Ormeggio Annuale", "Manutenzione", "Altro"])
-    f_attiva = st.sidebar.checkbox("Includi nei totali", value=True)
-
-    if st.sidebar.button("Aggiungi somma prevista"):
-        if f_importo > 0 and f_desc.strip():
-            nuova_voce = {
-                "Descrizione": f_desc.strip(),
-                "Importo Previsto": float(f_importo),
-                "Categoria": f_cat,
-                "Stato": "Attiva" if f_attiva else "Disattivata"
-            }
-            nuovo_vdf = pd.DataFrame([nuova_voce])
-            st.session_state.somme_previste = pd.concat([st.session_state.somme_previste, nuovo_vdf], ignore_index=True)
-            st.sidebar.success("Somma prevista aggiunta!")
-            st.rerun()
-        else:
-            st.sidebar.error("Inserisci una descrizione e un importo valido.")
-
-elif scelta_menu == "🛠️ Note operative":
-    st.sidebar.subheader("🛠️ Registra attività")
-    st.sidebar.info("Le attività registrate qui vengono considerate nel riepilogo generale dei conti.")
-    m_data = st.sidebar.date_input("Data attività", date.today(), key="m_data")
-    m_desc = st.sidebar.text_input("Descrizione attività (es. Lucidatura opera viva)", value="", key="m_desc")
-    m_ore = st.sidebar.number_input("Ore impiegate", min_value=0.5, step=0.5, value=2.0, key="m_ore")
-    m_tariffa = st.sidebar.number_input("Tariffa oraria (€/h)", min_value=0.0, step=5.0, value=25.0, key="m_tariffa")
-
-    if st.sidebar.button("Registra attività"):
-        if m_desc.strip() and m_ore > 0:
-            tot_valore = float(m_ore * m_tariffa)
-            nuova_mano = {
-                "Data": str(m_data),
-                "Attività / Lavoro": m_desc.strip(),
-                "Ore": float(m_ore),
-                "Tariffa Oraria (€)": float(m_tariffa),
-                "Totale Stimato (€)": tot_valore
-            }
-            nuovo_mdf = pd.DataFrame([nuova_mano])
-            st.session_state.attivita_ore = pd.concat([st.session_state.attivita_ore, nuovo_mdf], ignore_index=True)
-            st.sidebar.success("Attività registrata!")
-            st.rerun()
-        else:
-            st.sidebar.error("Compila correttamente i campi.")
-
-else:
-    st.sidebar.info("Carica il tuo file Excel (.xlsx) nell'area centrale per importare le operazioni.")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("💾 Salva / Ripristina Dati")
-backup_payload = {
-    "transazioni": st.session_state.transazioni.fillna("").to_dict(orient="records"),
-    "somme_previste": st.session_state.somme_previste.fillna("").to_dict(orient="records"),
-    "attivita_ore": st.session_state.attivita_ore.fillna("").to_dict(orient="records"),
-}
-st.sidebar.download_button(
-    label="⬇️ Scarica Backup (.json)",
-    data=json.dumps(backup_payload, ensure_ascii=False, indent=2).encode("utf-8"),
-    file_name=f"backup_spese_barca_{date.today()}.json",
-    mime="application/json"
-)
-
-file_caricato = st.sidebar.file_uploader("⬆️ Ripristina da Backup (.json)", type=["json"], key="upload_backup")
-if file_caricato is not None:
-    if st.sidebar.button("Ripristina dati dal file"):
-        try:
-            dati_rip = json.loads(file_caricato.getvalue().decode("utf-8"))
-            for chiave, cols in [
-                ("transazioni", COLONNE_TRANSAZIONI),
-                ("somme_previste", COLONNE_PREVISTE),
-                ("attivita_ore", COLONNE_ATTIVITA),
-            ]:
-                records = dati_rip.get(chiave, [])
-                if records:
-                    df_tmp = pd.DataFrame(records)
-                    for c in cols:
-                        if c not in df_tmp.columns:
-                            df_tmp[c] = ""
-                    st.session_state[chiave] = df_tmp[cols]
-                else:
-                    st.session_state[chiave] = pd.DataFrame(columns=cols)
-            st.sidebar.success("Dati ripristinati!")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"File non valido: {e}")
-
-if scelta_menu == "📥 Importa da Excel":
-    st.markdown("---")
-    st.subheader("📥 Importa Storico Operazioni da Excel (.xlsx)")
-    st.markdown("Carica il file Excel dove hai registrato le spese: potrai abbinare le colonne del tuo foglio a quelle dell'app prima di importare.")
-
-    excel_file = st.file_uploader("Seleziona file Excel (.xlsx)", type=["xlsx"], key="upload_excel_operazioni")
-    if excel_file is not None:
-        try:
-            xl = pd.ExcelFile(excel_file, engine="openpyxl")
-            foglio_scelto = st.selectbox("Seleziona foglio del file Excel", xl.sheet_names)
-            df_raw_excel = xl.parse(foglio_scelto)
-
-            if df_raw_excel.empty:
-                st.warning("Il foglio selezionato è vuoto.")
-            else:
-                st.caption("Anteprima delle prime righe del tuo file Excel:")
-                st.dataframe(df_raw_excel.head(5), use_container_width=True)
-
-                opzioni_colonne = ["— Nessuna / Valore predefinito —"] + list(df_raw_excel.columns)
-
-                def indice_suggerito(candidati):
-                    for idx, nome_col in enumerate(df_raw_excel.columns, start=1):
-                        basso = str(nome_col).strip().lower()
-                        if any(c in basso for c in candidati):
-                            return idx
-                    return 0
-
-                c_m1, c_m2 = st.columns(2)
-                with c_m1:
-                    col_data = st.selectbox("Colonna Data", opzioni_colonne, index=indice_suggerito(["data", "date"]))
-                    col_tipo = st.selectbox("Colonna Tipo (Spesa / Entrata / Rimborso)", opzioni_colonne, index=indice_suggerito(["tipo", "movimento"]))
-                    col_cat = st.selectbox("Colonna Categoria", opzioni_colonne, index=indice_suggerito(["categ", "voce"]))
-                    col_desc = st.selectbox("Colonna Descrizione", opzioni_colonne, index=indice_suggerito(["descr", "nota", "dettagl"]))
-                with c_m2:
-                    col_imp = st.selectbox("Colonna Importo (€)", opzioni_colonne, index=indice_suggerito(["import", "euro", "€", "totale", "cifra"]))
-                    col_pagato = st.selectbox("Colonna Pagato Da", opzioni_colonne, index=indice_suggerito(["pagat", "chi", "socio", "autore"]))
-                    col_coinv = st.selectbox("Colonna Coinvolti", opzioni_colonne, index=indice_suggerito(["coinvolt", "divis", "tra"]))
-                    tipo_default = st.selectbox("Tipo predefinito (se manca la colonna Tipo)", ["Spesa", "Entrata", "Rimborso tra soci"])
-
-                modalita_import = st.radio(
-                    "Come vuoi applicare i dati importati?",
-                    ["Aggiungi ai movimenti già presenti", "Sostituisci tutti i movimenti attuali"],
-                    horizontal=True
-                )
-
-                if st.button("✅ Importa operazioni nell'app"):
-                    righe_importate = []
-                    for _, r in df_raw_excel.iterrows():
-                        imp_num = 0.0
-                        if col_imp != "— Nessuna / Valore predefinito —":
-                            val_raw = str(r.get(col_imp, "")).replace("€", "").replace(",", ".").strip()
-                            imp_num = abs(float(pd.to_numeric(val_raw, errors="coerce") or 0.0))
-
-                        desc_val = ""
-                        if col_desc != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_desc)):
-                            desc_val = str(r.get(col_desc)).strip()
-
-                        if imp_num == 0.0 and not desc_val:
-                            continue
-
-                        data_val = str(date.today())
-                        if col_data != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_data)):
-                            dt_conv = pd.to_datetime(r.get(col_data), errors="coerce")
-                            data_val = str(dt_conv.date()) if pd.notna(dt_conv) else str(r.get(col_data)).strip()
-
-                        tipo_val = tipo_default
-                        if col_tipo != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_tipo)):
-                            t_txt = str(r.get(col_tipo)).strip().lower()
-                            if "entrat" in t_txt:
-                                tipo_val = "Entrata"
-                            elif "rimbors" in t_txt:
-                                tipo_val = "Rimborso tra soci"
-                            elif "spes" in t_txt:
-                                tipo_val = "Spesa"
-                            elif str(r.get(col_tipo)).strip():
-                                tipo_val = str(r.get(col_tipo)).strip()
-
-                        cat_val = "Altro" if tipo_val == "Spesa" else ("Entrata Comune (es. Charter)" if tipo_val == "Entrata" else "Rimborso")
-                        if col_cat != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_cat)) and str(r.get(col_cat)).strip():
-                            cat_val = str(r.get(col_cat)).strip()
-
-                        pag_val = io if tipo_val == "Spesa" else ("Cassa Comune" if tipo_val == "Entrata" else io)
-                        if col_pagato != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_pagato)) and str(r.get(col_pagato)).strip():
-                            p_txt = str(r.get(col_pagato)).strip()
-                            if p_txt.lower() in ("antonio", "io", "a"):
-                                pag_val = io
-                            elif p_txt.lower() in ("tonino", "socio", "t"):
-                                pag_val = socio
-                            else:
-                                pag_val = p_txt
-
-                        coinv_val = ", ".join(soci)
-                        if col_coinv != "— Nessuna / Valore predefinito —" and pd.notna(r.get(col_coinv)) and str(r.get(col_coinv)).strip():
-                            coinv_val = str(r.get(col_coinv)).strip()
-
-                        righe_importate.append({
-                            "Data": data_val,
-                            "Tipo": tipo_val,
-                            "Categoria": cat_val,
-                            "Descrizione": desc_val,
-                            "Importo": round(imp_num, 2),
-                            "Pagato Da": pag_val,
-                            "Coinvolti": coinv_val,
-                        })
-
-                    if not righe_importate:
-                        st.error("Nessuna riga valida trovata: controlla la colonna Importo o Descrizione.")
-                    else:
-                        df_import = pd.DataFrame(righe_importate, columns=COLONNE_TRANSAZIONI)
-                        if modalita_import == "Sostituisci tutti i movimenti attuali":
-                            st.session_state.transazioni = df_import
-                        else:
-                            st.session_state.transazioni = pd.concat(
-                                [st.session_state.transazioni, df_import], ignore_index=True
-                            )
-                        st.success(f"Importate {len(righe_importate)} operazioni dal file Excel!")
-                        st.rerun()
-        except Exception as e:
-            st.error(f"Impossibile leggere il file Excel: {e}")
-
-st.subheader("📊 Situazione Finanziaria Condivisa")
-
-df = st.session_state.transazioni
-df_previste = st.session_state.somme_previste
-df_attivita = st.session_state.attivita_ore
-
-totale_spese_reali = pd.to_numeric(df[df["Tipo"] == "Spesa"]["Importo"], errors="coerce").fillna(0.0).sum() if not df.empty else 0.0
-totale_previste_attivo = pd.to_numeric(df_previste[df_previste["Stato"] == "Attiva"]["Importo Previsto"], errors="coerce").fillna(0.0).sum() if not df_previste.empty else 0.0
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Spese Reali Totali", f"{totale_spese_reali:.2f} €")
-col2.metric("Somme previste", f"{totale_previste_attivo:.2f} €")
-col3.metric("Totale Complessivo", f"{totale_spese_reali + totale_previste_attivo:.2f} €")
-
-saldi = {io: 0.0, socio: 0.0}
-
-if not df.empty:
-    for _, row in df.iterrows():
-        imp = float(pd.to_numeric(row.get("Importo", 0.0), errors="coerce") or 0.0)
-        paga = row.get("Pagato Da", "")
-        if row.get("Tipo") == "Spesa":
-            if paga in saldi:
-                saldi[paga] += imp
-            coinvolti_val = row.get("Coinvolti", "")
-            partecipanti = coinvolti_val.split(", ") if isinstance(coinvolti_val, str) and coinvolti_val else (coinvolti_val if isinstance(coinvolti_val, list) else soci)
-            quota_parte = imp / len(partecipanti) if len(partecipanti) > 0 else imp
-            for p in partecipanti:
-                if p in saldi:
-                    saldi[p] -= quota_parte
-        elif row.get("Tipo") == "Rimborso":
-            if paga in saldi:
-                saldi[paga] += imp
-            coinvolti_val = row.get("Coinvolti", "")
-            ricevente = coinvolti_val if isinstance(coinvolti_val, str) else (coinvolti_val[0] if coinvolti_val else "")
-            if ricevente in saldi:
-                saldi[ricevente] -= imp
-
-if not df_attivita.empty:
-    for _, row in df_attivita.iterrows():
-        valore_lavoro = float(pd.to_numeric(row.get("Totale Stimato (€)", 0.0), errors="coerce") or 0.0)
-        saldi[io] += valore_lavoro
-        quota_parte = valore_lavoro / len(soci)
-        for s in soci:
-            saldi[s] -= quota_parte
-
-testo_regolamento = ""
-if not df.empty or not df_attivita.empty:
-    st.markdown("---")
-    s_col1, s_col2 = st.columns(2)
-    with s_col1:
-        st.metric(label=f"Bilancio Finale {io}", value=f"{saldi[io]:.2f} €")
-    with s_col2:
-        st.metric(label=f"Bilancio Finale {socio}", value=f"{saldi[socio]:.2f} €")
-
-    diff = saldi[io] - saldi[socio]
-    if abs(diff) > 0.05:
-        if diff > 0:
-            testo_regolamento = f"{socio} deve dare {diff / 2:.2f} € a {io}."
-            st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
-        else:
-            testo_regolamento = f"{io} deve dare {abs(diff) / 2:.2f} € a {socio}."
-            st.info(f"💡 **Regolamento conti:** {testo_regolamento}")
-
-if not df_previste.empty:
-    with st.expander("📌 Visualizza e modifica Somme previste"):
-        st.caption("Modifica i valori nelle celle o elimina righe, poi clicca su Salva modifiche.")
-        prevista_mod = st.data_editor(
-            df_previste.copy(),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_previste"
-        )
-        if st.button("💾 Salva modifiche Somme previste"):
-            st.session_state.somme_previste = prevista_mod
-            st.success("Somme previste aggiornate!")
-            st.rerun()
-
-if not df.empty:
-    with st.expander("📜 Visualizza e modifica Storico Movimenti Reali (Spese/Entrate)"):
-        st.caption("Clicca su una cella per correggere importo, descrizione, data o chi ha pagato.")
-        movimenti_mod = st.data_editor(
-            df.copy(),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_movimenti"
-        )
-        if st.button("💾 Salva modifiche Movimenti"):
-            st.session_state.transazioni = movimenti_mod
-            st.success("Movimenti reali aggiornati!")
-            st.rerun()
-
-if not df_attivita.empty:
-    with st.expander("🛠️ Gestisci Note operative"):
-        st.caption("Modifica ore, tariffa o attività, oppure rimuovi singole righe.")
-        attivita_mod = st.data_editor(
-            df_attivita.copy(),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_attivita"
-        )
-        if "Ore" in attivita_mod.columns and "Tariffa Oraria (€)" in attivita_mod.columns:
-            attivita_mod["Totale Stimato (€)"] = (
-                pd.to_numeric(attivita_mod["Ore"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(attivita_mod["Tariffa Oraria (€)"], errors="coerce").fillna(0.0)
-            )
-        if st.button("💾 Salva modifiche Note operative"):
-            st.session_state.attivita_ore = attivita_mod
-            st.success("Note operative aggiornate!")
-            st.rerun()
-
-st.markdown("---")
-st.subheader("🖨️ Report per Tonino (Stampa / PDF ed Excel)")
-st.markdown("Esporta un riepilogo pulito con tutte le singole voci, somme previste e conguaglio.")
-
-buffer_excel = BytesIO()
-
-riepilogo_righe = [
-    {"Voce": "Data Report", "Valore": str(date.today())},
-    {"Voce": "Spese Reali Totali (€)", "Valore": round(float(totale_spese_reali), 2)},
-    {"Voce": "Somme Previste Attive (€)", "Valore": round(float(totale_previste_attivo), 2)},
-    {"Voce": "Totale Complessivo (€)", "Valore": round(float(totale_spese_reali + totale_previste_attivo), 2)},
-    {"Voce": f"Bilancio Finale {io} (€)", "Valore": round(float(saldi[io]), 2)},
-    {"Voce": f"Bilancio Finale {socio} (€)", "Valore": round(float(saldi[socio]), 2)},
-    {"Voce": "Regolamento Conti", "Valore": testo_regolamento if testo_regolamento else "Conti in pareggio"}
-]
-riepilogo_dati = pd.DataFrame(riepilogo_righe)
-
-voci_movimenti = []
-if not df.empty:
-    for _, r in df.iterrows():
-        voci_movimenti.append({
-            "Data": str(r.get("Data", "")),
-            "Tipo": str(r.get("Tipo", "")),
-            "Categoria": str(r.get("Categoria", "")),
-            "Descrizione": str(r.get("Descrizione", "")),
-            "Importo (€)": round(float(pd.to_numeric(r.get("Importo", 0.0), errors="coerce") or 0.0), 2),
-            "Pagato Da": str(r.get("Pagato Da", "")),
-            "Coinvolti": str(r.get("Coinvolti", ""))
-        })
-df_out = pd.DataFrame(voci_movimenti) if voci_movimenti else pd.DataFrame(
-    columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo (€)", "Pagato Da", "Coinvolti"]
-)
-
-voci_spese = [v for v in voci_movimenti if v["Tipo"] == "Spesa"]
-df_spese_out = pd.DataFrame(voci_spese) if voci_spese else pd.DataFrame(
-    columns=["Data", "Tipo", "Categoria", "Descrizione", "Importo (€)", "Pagato Da", "Coinvolti"]
-)
-
-voci_previste = []
-if not df_previste.empty:
-    for _, r in df_previste.iterrows():
-        voci_previste.append({
-            "Descrizione": str(r.get("Descrizione", "")),
-            "Categoria": str(r.get("Categoria", "")),
-            "Stato": str(r.get("Stato", "")),
-            "Importo Previsto (€)": round(float(pd.to_numeric(r.get("Importo Previsto", 0.0), errors="coerce") or 0.0), 2)
-        })
-df_previste_out = pd.DataFrame(voci_previste) if voci_previste else pd.DataFrame(
-    columns=["Descrizione", "Categoria", "Stato", "Importo Previsto (€)"]
-)
-
-with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
-    riepilogo_dati.to_excel(writer, sheet_name="Riepilogo", index=False)
-    df_out.to_excel(writer, sheet_name="Tutti i Movimenti", index=False)
-    df_spese_out.to_excel(writer, sheet_name="Solo Spese", index=False)
-    df_previste_out.to_excel(writer, sheet_name="Somme Previste", index=False)
-
-col_rep1, col_rep2 = st.columns(2)
-
-with col_rep1:
-    st.download_button(
-        label="📊 Scarica Report Excel (.xlsx)",
-        data=buffer_excel.getvalue(),
-        file_name=f"report_spese_barca_{date.today()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-with col_rep2:
-    righe_movimenti = ""
-    if not df.empty:
-        for _, r in df.iterrows():
-            imp_val = float(pd.to_numeric(r.get("Importo", 0.0), errors="coerce") or 0.0)
-            righe_movimenti += f"<li>{r.get('Data', '')} – {r.get('Tipo', '')} ({r.get('Categoria', '')}): {r.get('Descrizione', '')} — <b>{imp_val:.2f} €</b> (Pagato da: {r.get('Pagato Da', '')})</li>"
-    else:
-        righe_movimenti = "<li>Nessun movimento registrato</li>"
-
-    righe_previste = ""
-    if not df_previste.empty:
-        for _, r in df_previste.iterrows():
-            prev_val = float(pd.to_numeric(r.get("Importo Previsto", 0.0), errors="coerce") or 0.0)
-            righe_previste += f"<li>{r.get('Descrizione', '')} ({r.get('Categoria', '')}, {r.get('Stato', '')}): <b>{prev_val:.2f} €</b></li>"
-    else:
-        righe_previste = "<li>Nessuna somma prevista</li>"
-
-    html_report = f"""
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        body {{ font-family: Arial, sans-serif; padding: 24px; color: #222; }}
-        h1 {{ margin-bottom: 4px; }}
-        .data {{ color: #666; margin-bottom: 20px; }}
-        .box {{ border: 1px solid #ccc; padding: 14px; border-radius: 8px; margin-bottom: 18px; }}
-        button {{ padding: 10px 16px; font-size: 15px; cursor: pointer; margin-bottom: 20px; }}
-        @media print {{ button {{ display: none; }} }}
-      </style>
-    </head>
-    <body>
-      <button onclick="window.print()">🖨️ Stampa / Salva PDF</button>
-      <h1>Report Spese Barca</h1>
-      <div class="data">Data report: {date.today()}</div>
-      <div class="box">
-        <b>Riepilogo totali</b><br>
-        Spese reali totali: <b>{totale_spese_reali:.2f} €</b><br>
-        Somme previste: <b>{totale_previste_attivo:.2f} €</b><br>
-        Totale complessivo: <b>{totale_spese_reali + totale_previste_attivo:.2f} €</b><br><br>
-        Bilancio {io}: <b>{saldi[io]:.2f} €</b><br>
-        Bilancio {socio}: <b>{saldi[socio]:.2f} €</b><br>
-        {f"<p><b>Regolamento conti:</b> {testo_regolamento}</p>" if testo_regolamento else ""}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>⛵ Gestione Spese Barca</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --primary: #0f4c81;
+      --primary-light: #e6f0fa;
+      --accent: #1b8a5a;
+      --danger: #c0392b;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #dce3ec;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding: 14px; }
+    .container { max-width: 820px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; color: var(--primary); }
+    h2 { font-size: 1.15rem; margin: 0 0 12px; color: var(--primary); }
+    p.sub { margin: 0 0 16px; color: var(--muted); font-size: 0.92rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    @media (max-width: 640px) {
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    }
+    .metric { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+    .metric .label { font-size: 0.8rem; color: var(--muted); }
+    .metric .val { font-size: 1.25rem; font-weight: 700; margin-top: 4px; }
+    .banner { background: var(--primary-light); border-left: 4px solid var(--primary); padding: 12px; border-radius: 8px; margin-top: 12px; font-weight: 600; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tab-btn { padding: 9px 14px; border: 1px solid var(--border); background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text); }
+    .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; background: #fff; }
+    .checkbox-row { display: flex; gap: 14px; align-items: center; margin-top: 6px; }
+    .checkbox-row label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; cursor: pointer; }
+    .checkbox-row input { width: auto; }
+    .btn { display: inline-block; padding: 10px 16px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.95rem; margin-top: 12px; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn-danger { background: #fdecea; color: var(--danger); padding: 5px 9px; font-size: 0.8rem; margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+    th { background: var(--bg); color: var(--muted); font-weight: 600; }
+    .table-wrap { overflow-x: auto; }
+    .hidden { display: none !important; }
+    .print-only { display: none; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      .card { border: 1px solid #ccc; box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- BLOCCO ACCESSO -->
+    <div id="login-box" class="card no-print">
+      <h2>🔒 Accesso Riservato</h2>
+      <p class="sub">Inserisci la password per accedere alla gestione spese della barca.</p>
+      <label for="pwd-input">Password</label>
+      <input type="password" id="pwd-input" placeholder="Password..." onkeydown="if(event.key==='Enter') verificaLogin()" />
+      <button class="btn btn-primary" onclick="verificaLogin()">Entra</button>
+      <p id="login-err" style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;"></p>
+    </div>
+
+    <!-- APP PRINCIPALE -->
+    <div id="app-main" class="hidden">
+      <div class="card">
+        <h1>⛵ Gestione Spese Barca</h1>
+        <p class="sub no-print">Salvataggio automatico attivo su questo dispositivo • Soci: <b>Antonio</b> e <b>Tonino</b></p>
+        <p class="print-only">Report Spese Barca — Data: <span id="print-date"></span></p>
+
+        <div class="grid-3">
+          <div class="metric">
+            <div class="label">Spese Reali Totali</div>
+            <div class="val" id="m-spese">0.00 €</div>
+          </div>
+          <div class="metric">
+            <div class="label">Somme Previste (Attive)</div>
+            <div class="val" id="m-previste">0.00 €</div>
+          </div>
+          <div class="metric">
+            <div class="label">Totale Complessivo</div>
+            <div class="val" id="m-totale">0.00 €</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top: 10px;">
+          <div class="metric">
+            <div class="label">Bilancio Finale Antonio</div>
+            <div class="val" id="m-bal-antonio">0.00 €</div>
+          </div>
+          <div class="metric">
+            <div class="label">Bilancio Finale Tonino</div>
+            <div class="val" id="m-bal-tonino">0.00 €</div>
+          </div>
+        </div>
+
+        <div id="regolamento-box" class="banner hidden"></div>
       </div>
-      <div class="box">
-        <b>Somme previste</b>
-        <ul>{righe_previste}</ul>
-      </div>
-      <div class="box">
-        <b>Movimenti reali</b>
-        <ul>{righe_movimenti}</ul>
-      </div>
-    </body>
-    </html>
-    """
 
-    st.download_button(
-        label="🖨️ Scarica Report Stampa / PDF",
-        data=html_report.encode("utf-8"),
-        file_name=f"report_spese_barca_{date.today()}.html",
-        mime="text/html"
-    )
+      <!-- MODULI DI INSERIMENTO (NASCOSTI IN STAMPA) -->
+      <div class="card no-print">
+        <div class="tabs">
+          <button class="tab-btn active" onclick="mostraTab('tab-op', this)">➕ Operazione Reale</button>
+          <button class="tab-btn" onclick="mostraTab('tab-prev', this)">📌 Somme Previste</button>
+          <button class="tab-btn" onclick="mostraTab('tab-note', this)">🛠️ Note Operative (Private)</button>
+        </div>
+
+        <!-- TAB 1: OPERAZIONE REALE -->
+        <div id="tab-op">
+          <div class="grid-2">
+            <div>
+              <label>Tipo operazione</label>
+              <select id="op-tipo" onchange="aggiornaCampiTipo()">
+                <option value="Spesa">Spesa</option>
+                <option value="Entrata">Entrata</option>
+                <option value="Rimborso">Rimborso tra soci</option>
+              </select>
+            </div>
+            <div>
+              <label>Data</label>
+              <input type="date" id="op-data" />
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div>
+              <label>Importo (€)</label>
+              <input type="number" id="op-importo" step="0.01" min="0" placeholder="0.00" />
+            </div>
+            <div id="wrap-categoria">
+              <label>Categoria</label>
+              <select id="op-categoria">
+                <option>Carburante</option>
+                <option>Ormeggio</option>
+                <option>Manutenzione Ordinaria</option>
+                <option>Manutenzione Straordinaria</option>
+                <option>Assicurazione</option>
+                <option>Altro</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="wrap-desc">
+            <label>Descrizione</label>
+            <input type="text" id="op-desc" placeholder="Es. Rifornimento gasolio" />
+          </div>
+
+          <div class="grid-2" id="wrap-pagato">
+            <div>
+              <label id="lbl-pagato">Pagato da chi?</label>
+              <select id="op-pagato">
+                <option value="Antonio">Antonio</option>
+                <option value="Tonino">Tonino</option>
+              </select>
+            </div>
+            <div id="wrap-coinvolti">
+              <label>Diviso tra</label>
+              <div class="checkbox-row">
+                <label><input type="checkbox" id="chk-antonio" checked /> Antonio</label>
+                <label><input type="checkbox" id="chk-tonino" checked /> Tonino</label>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" onclick="aggiungiOperazione()">Registra Operazione</button>
+        </div>
+
+        <!-- TAB 2: SOMME PREVISTE -->
+        <div id="tab-prev" class="hidden">
+          <div class="grid-2">
+            <div>
+              <label>Descrizione voce</label>
+              <input type="text" id="prev-desc" placeholder="Es. Assicurazione Annuale" />
+            </div>
+            <div>
+              <label>Importo previsto (€)</label>
+              <input type="number" id="prev-importo" step="0.01" min="0" placeholder="0.00" />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label>Categoria</label>
+              <select id="prev-cat">
+                <option>Assicurazione</option>
+                <option>Ormeggio Annuale</option>
+                <option>Manutenzione</option>
+                <option>Altro</option>
+              </select>
+            </div>
+            <div>
+              <label>Stato</label>
+              <select id="prev-stato">
+                <option value="Attiva">Attiva (includi nei totali)</option>
+                <option value="Disattivata">Disattivata</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="aggiungiPrevista()">Aggiungi Somma Prevista</button>
+        </div>
+
+        <!-- TAB 3: NOTE OPERATIVE (INCLUSE NEI SALDI, NASCOSTE IN STAMPA PER TONINO) -->
+        <div id="tab-note" class="hidden">
+          <p class="sub">Le attività registrate qui entrano nei conguagli ma <b>non vengono stampate</b> nel report per Tonino.</p>
+          <div class="grid-2">
+            <div>
+              <label>Data attività</label>
+              <input type="date" id="att-data" />
+            </div>
+            <div>
+              <label>Attività / Lavoro</label>
+              <input type="text" id="att-desc" placeholder="Es. Lucidatura opera viva" />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label>Ore impiegate</label>
+              <input type="number" id="att-ore" step="0.5" min="0.5" value="2" />
+            </div>
+            <div>
+              <label>Tariffa oraria (€/h)</label>
+              <input type="number" id="att-tariffa" step="1" min="0" value="25" />
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="aggiungiAttivita()">Registra Attività</button>
+        </div>
+      </div>
+
+      <!-- TABELLA SOMME PREVISTE -->
+      <div class="card">
+        <h2>📌 Somme Previste</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Descrizione</th>
+                <th>Categoria</th>
+                <th>Stato</th>
+                <th>Importo</th>
+                <th class="no-print">Azioni</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-previste"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TABELLA MOVIMENTI REALI -->
+      <div class="card">
+        <h2>📜 Storico Movimenti Reali</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Categoria</th>
+                <th>Descrizione</th>
+                <th>Pagato Da</th>
+                <th>Coinvolti</th>
+                <th>Importo</th>
+                <th class="no-print">Azioni</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-transazioni"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TABELLA NOTE OPERATIVE (SEMPRE NASCOSTA IN STAMPA) -->
+      <div class="card no-print">
+        <h2>🛠️ Note Operative (Riservate Antonio)</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Attività</th>
+                <th>Ore</th>
+                <th>Tariffa</th>
+                <th>Totale</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-attivita"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- REPORT E BACKUP -->
+      <div class="card no-print">
+        <h2>🖨️ Report per Tonino & Backup Dati</h2>
+        <p class="sub">Puoi stampare o salvare in PDF il riepilogo pulito per Tonino, oppure esportare una copia di sicurezza (.json).</p>
+        <button class="btn btn-accent" onclick="stampaReport()">🖨️ Stampa / Salva PDF per Tonino</button>
+        <button class="btn btn-outline" onclick="scaricaBackup()">⬇️ Scarica Backup (.json)</button>
+        <label class="btn btn-outline" style="cursor:pointer;">
+          ⬆️ Carica Backup (.json)
+          <input type="file" accept=".json" style="display:none;" onchange="caricaBackup(event)" />
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Imposta una password qui (lascia "" se non vuoi richiesta password all'apertura)
+    const PASSWORD_APP = "barca2026";
+    const STORAGE_KEY = "spese_barca_antonio_tonino_v1";
+
+    let stato = {
+      transazioni: [],
+      somme_previste: [],
+      attivita_ore: []
+    };
+
+    function oggiISO() {
+      return new Date().toISOString().split("T")[0];
+    }
+
+    window.onload = function () {
+      document.getElementById("op-data").value = oggiISO();
+      document.getElementById("att-data").value = oggiISO();
+      caricaDaMemoria();
+
+      if (!PASSWORD_APP || sessionStorage.getItem("barca_auth") === "1") {
+        document.getElementById("login-box").classList.add("hidden");
+        document.getElementById("app-main").classList.remove("hidden");
+        aggiornaVista();
+      }
+    };
+
+    function verificaLogin() {
+      const val = document.getElementById("pwd-input").value;
+      if (val === PASSWORD_APP) {
+        sessionStorage.setItem("barca_auth", "1");
+        document.getElementById("login-box").classList.add("hidden");
+        document.getElementById("app-main").classList.remove("hidden");
+        aggiornaVista();
+      } else {
+        document.getElementById("login-err").textContent = "Password non corretta.";
+      }
+    }
+
+    function salvaInMemoria() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stato));
+    }
+
+    function caricaDaMemoria() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          stato.transazioni = Array.isArray(parsed.transazioni) ? parsed.transazioni : [];
+          stato.somme_previste = Array.isArray(parsed.somme_previste) ? parsed.somme_previste : [];
+          stato.attivita_ore = Array.isArray(parsed.attivita_ore) ? parsed.attivita_ore : [];
+        }
+      } catch (e) {
+        console.error("Errore caricamento memoria:", e);
+      }
+    }
+
+    function mostraTab(idTab, btn) {
+      ["tab-op", "tab-prev", "tab-note"].forEach(id => document.getElementById(id).classList.add("hidden"));
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById(idTab).classList.remove("hidden");
+      btn.classList.add("active");
+    }
+
+    function aggiornaCampiTipo() {
+      const tipo = document.getElementById("op-tipo").value;
+      const wrapCat = document.getElementById("wrap-categoria");
+      const wrapPagato = document.getElementById("wrap-pagato");
+      const wrapCoinvolti = document.getElementById("wrap-coinvolti");
+      const lblPagato = document.getElementById("lbl-pagato");
+
+      if (tipo === "Spesa") {
+        wrapCat.classList.remove("hidden");
+        wrapPagato.classList.remove("hidden");
+        wrapCoinvolti.classList.remove("hidden");
+        lblPagato.textContent = "Pagato da chi?";
+      } else if (tipo === "Entrata") {
+        wrapCat.classList.add("hidden");
+        wrapPagato.classList.add("hidden");
+      } else {
+        wrapCat.classList.add("hidden");
+        wrapPagato.classList.remove("hidden");
+        wrapCoinvolti.classList.add("hidden");
+        lblPagato.textContent = "Chi ha fatto il rimborso?";
+      }
+    }
+
+    function aggiungiOperazione() {
+      const tipo = document.getElementById("op-tipo").value;
+      const data = document.getElementById("op-data").value || oggiISO();
+      const importo = parseFloat(document.getElementById("op-importo").value);
+      let desc = document.getElementById("op-desc").value.trim();
+
+      if (isNaN(importo) || importo <= 0) {
+        alert("Inserisci un importo maggiore di zero.");
+        return;
+      }
+
+      let categoria = "";
+      let pagatoDa = "";
+      let coinvolti = [];
+
+      if (tipo === "Spesa") {
+        categoria = document.getElementById("op-categoria").value;
+        pagatoDa = document.getElementById("op-pagato").value;
+        if (document.getElementById("chk-antonio").checked) coinvolti.push("Antonio");
+        if (document.getElementById("chk-tonino").checked) coinvolti.push("Tonino");
+        if (coinvolti.length === 0) {
+          alert("Seleziona almeno un socio coinvolto nella spesa.");
+          return;
+        }
+      } else if (tipo === "Entrata") {
+        categoria = "Entrata Comune";
+        pagatoDa = "Cassa Comune";
+        coinvolti = ["Antonio", "Tonino"];
+      } else {
+        categoria = "Rimborso";
+        pagatoDa = document.getElementById("op-pagato").value;
+        const ricevente = pagatoDa === "Antonio" ? "Tonino" : "Antonio";
+        coinvolti = [ricevente];
+        if (!desc) desc = `Rimborso da ${pagatoDa} a ${ricevente}`;
+      }
+
+      stato.transazioni.push({
+        Data: data,
+        Tipo: tipo,
+        Categoria: categoria,
+        Descrizione: desc,
+        Importo: importo,
+        PagatoDa: pagatoDa,
+        Coinvolti: coinvolti.join(", ")
+      });
+
+      document.getElementById("op-importo").value = "";
+      document.getElementById("op-desc").value = "";
+      salvaInMemoria();
+      aggiornaVista();
+    }
+
+    function aggiungiPrevista() {
+      const desc = document.getElementById("prev-desc").value.trim();
+      const importo = parseFloat(document.getElementById("prev-importo").value);
+      const cat = document.getElementById("prev-cat").value;
+      const statoVoce = document.getElementById("prev-stato").value;
+
+      if (!desc || isNaN(importo) || importo <= 0) {
+        alert("Inserisci descrizione e importo previsto valido.");
+        return;
+      }
+
+      stato.somme_previste.push({
+        Descrizione: desc,
+        ImportoPrevisto: importo,
+        Categoria: cat,
+        Stato: statoVoce
+      });
+
+      document.getElementById("prev-desc").value = "";
+      document.getElementById("prev-importo").value = "";
+      salvaInMemoria();
+      aggiornaVista();
+    }
+
+    function aggiungiAttivita() {
+      const data = document.getElementById("att-data").value || oggiISO();
+      const desc = document.getElementById("att-desc").value.trim();
+      const ore = parseFloat(document.getElementById("att-ore").value);
+      const tariffa = parseFloat(document.getElementById("att-tariffa").value);
+
+      if (!desc || isNaN(ore) || ore <= 0 || isNaN(tariffa) || tariffa < 0) {
+        alert("Compila correttamente tutti i campi dell'attività.");
+        return;
+      }
+
+      stato.attivita_ore.push({
+        Data: data,
+        Attivita: desc,
+        Ore: ore,
+        Tariffa: tariffa,
+        Totale: ore * tariffa
+      });
+
+      document.getElementById("att-desc").value = "";
+      salvaInMemoria();
+      aggiornaVista();
+    }
+
+    function eliminaRiga(lista, index) {
+      if (confirm("Vuoi eliminare questa voce?")) {
+        stato[lista].splice(index, 1);
+        salvaInMemoria();
+        aggiornaVista();
+      }
+    }
+
+    function toggleStatoPrevista(index) {
+      const attuale = stato.somme_previste[index].Stato;
+      stato.somme_previste[index].Stato = attuale === "Attiva" ? "Disattivata" : "Attiva";
+      salvaInMemoria();
+      aggiornaVista();
+    }
+
+    function aggiornaVista() {
+      let totSpese = 0;
+      let totPreviste = 0;
+      const saldi = { Antonio: 0, Tonino: 0 };
+
+      stato.transazioni.forEach(r => {
+        const imp = Number(r.Importo) || 0;
+        if (r.Tipo === "Spesa") {
+          totSpese += imp;
+          if (saldi[r.PagatoDa] !== undefined) saldi[r.PagatoDa] += imp;
+          const part = (r.Coinvolti || "Antonio, Tonino").split(",").map(s => s.trim()).filter(Boolean);
+          const quota = part.length > 0 ? imp / part.length : imp;
+          part.forEach(p => {
+            if (saldi[p] !== undefined) saldi[p] -= quota;
+          });
+        } else if (r.Tipo === "Rimborso") {
+          if (saldi[r.PagatoDa] !== undefined) saldi[r.PagatoDa] += imp;
+          const ric = (r.Coinvolti || "").trim();
+          if (saldi[ric] !== undefined) saldi[ric] -= imp;
+        }
+      });
+
+      stato.attivita_ore.forEach(a => {
+        const val = Number(a.Totale) || 0;
+        saldi.Antonio += val;
+        saldi.Antonio -= val / 2;
+        saldi.Tonino -= val / 2;
+      });
+
+      stato.somme_previste.forEach(p => {
+        if (p.Stato === "Attiva") totPreviste += Number(p.ImportoPrevisto) || 0;
+      });
+
+      document.getElementById("m-spese").textContent = totSpese.toFixed(2) + " €";
+      document.getElementById("m-previste").textContent = totPreviste.toFixed(2) + " €";
+      document.getElementById("m-totale").textContent = (totSpese + totPreviste).toFixed(2) + " €";
+      document.getElementById("m-bal-antonio").textContent = saldi.Antonio.toFixed(2) + " €";
+      document.getElementById("m-bal-tonino").textContent = saldi.Tonino.toFixed(2) + " €";
+
+      const regBox = document.getElementById("regolamento-box");
+      const diff = saldi.Antonio - saldi.Tonino;
+      if (Math.abs(diff) > 0.05) {
+        regBox.classList.remove("hidden");
+        if (diff > 0) {
+          regBox.textContent = `💡 Regolamento conti: Tonino deve dare ${(diff / 2).toFixed(2)} € a Antonio.`;
+        } else {
+          regBox.textContent = `💡 Regolamento conti: Antonio deve dare ${(Math.abs(diff) / 2).toFixed(2)} € a Tonino.`;
+        }
+      } else {
+        regBox.classList.add("hidden");
+      }
+
+      // Render Somme Previste
+      const tbPrev = document.getElementById("tbody-previste");
+      tbPrev.innerHTML = stato.somme_previste.length === 0
+        ? `<tr><td colspan="5" style="color:var(--muted)">Nessuna somma prevista</td></tr>`
+        : stato.somme_previste.map((p, i) => `
+          <tr>
+            <td>${escapeHtml(p.Descrizione)}</td>
+            <td>${escapeHtml(p.Categoria)}</td>
+            <td><button class="btn btn-outline" style="margin:0;padding:3px 8px;font-size:0.8rem;" onclick="toggleStatoPrevista(${i})">${escapeHtml(p.Stato)}</button></td>
+            <td><b>${Number(p.ImportoPrevisto).toFixed(2)} €</b></td>
+            <td class="no-print"><button class="btn btn-danger" onclick="eliminaRiga('somme_previste', ${i})">Elimina</button></td>
+          </tr>
+        `).join("");
+
+      // Render Transazioni
+      const tbTrans = document.getElementById("tbody-transazioni");
+      tbTrans.innerHTML = stato.transazioni.length === 0
+        ? `<tr><td colspan="8" style="color:var(--muted)">Nessun movimento registrato</td></tr>`
+        : stato.transazioni.map((t, i) => `
+          <tr>
+            <td>${escapeHtml(t.Data)}</td>
+            <td>${escapeHtml(t.Tipo)}</td>
+            <td>${escapeHtml(t.Categoria)}</td>
+            <td>${escapeHtml(t.Descrizione)}</td>
+            <td>${escapeHtml(t.PagatoDa)}</td>
+            <td>${escapeHtml(t.Coinvolti)}</td>
+            <td><b>${Number(t.Importo).toFixed(2)} €</b></td>
+            <td class="no-print"><button class="btn btn-danger" onclick="eliminaRiga('transazioni', ${i})">Elimina</button></td>
+          </tr>
+        `).join("");
+
+      // Render Note Operative
+      const tbAtt = document.getElementById("tbody-attivita");
+      tbAtt.innerHTML = stato.attivita_ore.length === 0
+        ? `<tr><td colspan="6" style="color:var(--muted)">Nessuna attività registrata</td></tr>`
+        : stato.attivita_ore.map((a, i) => `
+          <tr>
+            <td>${escapeHtml(a.Data)}</td>
+            <td>${escapeHtml(a.Attivita)}</td>
+            <td>${Number(a.Ore).toFixed(1)}</td>
+            <td>${Number(a.Tariffa).toFixed(2)} €</td>
+            <td><b>${Number(a.Totale).toFixed(2)} €</b></td>
+            <td><button class="btn btn-danger" onclick="eliminaRiga('attivita_ore', ${i})">Elimina</button></td>
+          </tr>
+        `).join("");
+    }
+
+    function escapeHtml(str) {
+      return String(str || "").replace(/[&<>"']/g, m => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[m]));
+    }
+
+    function stampaReport() {
+      document.getElementById("print-date").textContent = oggiISO();
+      window.print();
+    }
+
+    function scaricaBackup() {
+      const blob = new Blob([JSON.stringify(stato, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup_spese_barca_${oggiISO()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function caricaBackup(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const dati = JSON.parse(e.target.result);
+          stato.transazioni = Array.isArray(dati.transazioni) ? dati.transazioni : [];
+          stato.somme_previste = Array.isArray(dati.somme_previste) ? dati.somme_previste : [];
+          stato.attivita_ore = Array.isArray(dati.attivita_ore) ? dati.attivita_ore : [];
+          salvaInMemoria();
+          aggiornaVista();
+          alert("Backup ripristinato con successo!");
+        } catch (err) {
+          alert("File di backup non valido.");
+        }
+      };
+      reader.readAsText(file);
+    }
+  </script>
+</body>
+</html>
